@@ -1,0 +1,68 @@
+name: android-aarch64
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build_android:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: Free disk space
+      run: |
+        sudo swapoff -a
+        sudo rm -f /swapfile
+        sudo apt clean
+        docker rmi $(docker image ls -aq)
+        df -h
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install libepoxy-dev libglib2.0-dev libsdl2-dev ninja-build
+
+    - name: Download Android NDK
+      run: |
+        wget https://dl.google.com/android/repository/android-ndk-r23c-linux.zip
+        unzip android-ndk-r23c-linux.zip
+        rm android-ndk-r23c-linux.zip
+      env:
+        NDK_HOME: ${{ github.workspace }}/android-ndk-r23c
+        PATH: ${{ github.workspace }}/android-ndk-r23c/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+
+    - name: Get shallow submodule
+      run: git submodule update --init --recursive --depth 1
+
+    - name: Build QEMU for Android
+      run: |
+        mkdir -p qemu/build
+        cd qemu/build
+        ../configure --disable-werror --target-list=arm-linux-user
+        make -j$(nproc)
+
+    - name: Configure FEX for Android
+      run: |
+        mkdir -p fex/build_android
+        cd fex/build_android
+        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_LTO=True -DBUILD_TESTS=False -DENABLE_ASSERTIONS=False \
+              -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 -DCMAKE_TOOLCHAIN_FILE=$NDK_HOME/build/cmake/android.toolchain.cmake ..
+        make -j$(nproc) FEXCore_shared
+
+    - name: Build Wine for Android
+      run: |
+        export CFLAGS="-O2 -D__ANDROID_API__=28"
+        export LDFLAGS="-L$NDK_HOME/platforms/android-28/arch-arm64/usr/lib"
+        mkdir -p wine/build
+        cd wine/build
+        ../configure --host=aarch64-linux-android \
+                     --with-wine-tools=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin \
+                     --without-x --without-fontconfig \
+                     --with-pulse --disable-tests
+        make -j$(nproc) dlls/fexcore
+        make -j$(nproc) dlls/ntdll
+        make -j$(nproc) dlls/wow64
+        make -j$(nproc) dlls/xtajit
