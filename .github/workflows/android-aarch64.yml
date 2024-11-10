@@ -23,7 +23,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install libepoxy-dev libglib2.0-dev libsdl2-dev ninja-build
+        sudo apt install libepoxy-dev libglib2.0-dev libsdl2-dev ninja-build wget
 
     - name: Download Android NDK
       run: |
